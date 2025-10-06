@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: normality-4-0
+    env: node
+    plan: free
+    autoDeploy: true
+    buildCommand: npm ci && npm run client:build
+    startCommand: node server/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      # Optional API keys for trends (server/trends.js)
+      - key: TMDB_API_KEY
+        sync: false
+      - key: IG_ACCESS_TOKEN
+        sync: false
+      - key: IG_BUSINESS_USER_ID
+        sync: false
+      - key: IG_HASHTAGS
+        value: movies,cinema,memes,viral,trending

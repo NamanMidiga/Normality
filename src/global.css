@@ -1,0 +1,33 @@
+/* Global resets and mobile fixes */
+
+/* Prevent iOS Safari auto text size adjustments */
+html { -webkit-text-size-adjust: 100%; }
+
+html, body, #root { height: 100%; }
+/* Better fill on iOS Safari */
+html { height: -webkit-fill-available; }
+
+html, body {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* single fixed page, no body scroll */
+  overscroll-behavior-y: none; /* prevent iOS/Chrome overscroll bounce */
+}
+
+/* Ensure full-bleed and predictable sizing */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Dark background to match the app */
+body {
+  background: #000;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  touch-action: manipulation; /* improve tap responsiveness */
+}
+
+/* Prevent input focus zoom on iOS by keeping font-size >= 16px */
+input, textarea, select { font-size: 16px; }
+
+/* Media elements scale to container width */
+img, video { max-width: 100%; height: auto; }
