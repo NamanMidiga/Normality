@@ -324,6 +324,64 @@ function getRoomKeyFromLocation(lat, lon) {
   return `${latKey}:${lonKey}`;
 }
 
+// Compute the center lat/lon (degrees) for a given grid cell key
+function getCellCenterLatLon(latKey, lonKey) {
+  const metersPerDegLat = 111000;
+  const latMeters = latKey * 100; // cell center by rounding quantizer
+  const lat = latMeters / metersPerDegLat;
+  const metersPerDegLon = 111000 * Math.cos((lat * Math.PI) / 180);
+  const lonMeters = lonKey * 100;
+  const lon = metersPerDegLon ? (lonMeters / metersPerDegLon) : 0;
+  return { lat, lon };
+}
+
+function distanceMeters(a, b) {
+  try {
+    const metersPerDegLat = 111000;
+    const midLat = (a.lat + b.lat) / 2;
+    const metersPerDegLon = 111000 * Math.cos((midLat * Math.PI) / 180);
+    const dLat = (a.lat - b.lat) * metersPerDegLat;
+    const dLon = (a.lon - b.lon) * metersPerDegLon;
+    return Math.sqrt(dLat * dLat + dLon * dLon);
+  } catch (_) {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+// Prefer an existing nearby room (<=100m) to avoid boundary splits for Join
+function selectPreferredRoomKey(lat, lon, discussion) {
+  const metersPerDegLat = 111000;
+  const metersPerDegLon = 111000 * Math.cos((lat * Math.PI) / 180);
+  const latMeters = lat * metersPerDegLat;
+  const lonMeters = lon * metersPerDegLon;
+  const cellSize = 100;
+  const baseLatKey = Math.round(latMeters / cellSize);
+  const baseLonKey = Math.round(lonMeters / cellSize);
+
+  let best = null; // { key, dist }
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const latKey = baseLatKey + dy;
+      const lonKey = baseLonKey + dx;
+      const k = `${latKey}:${lonKey}${discussion ? '|discussion' : ''}`;
+      const set = rooms.get(k);
+      if (!set || set.size === 0) continue;
+      // Ensure there is at least one active participant (not just spectators)
+      const hasActive = Array.from(set).some((c) => c.ws && c.ws.readyState === 1 && !c.spectate);
+      if (!hasActive) continue;
+      const center = getCellCenterLatLon(latKey, lonKey);
+      const d = distanceMeters({ lat, lon }, center);
+      if (d <= 100 && (!best || d < best.dist)) {
+        best = { key: k, dist: d };
+      }
+    }
+  }
+
+  if (best) return best.key;
+  // Fall back to base cell
+  return `${baseLatKey}:${baseLonKey}${discussion ? '|discussion' : ''}`;
+}
+
 function isBanned(deviceId) {
   const record = bansByDevice.get(deviceId);
   if (!record) return false;
@@ -377,13 +435,17 @@ wss.on('connection', (ws) => {
       client.spectate = !!spectate;
       client.deviceId = String(deviceId || client.id);
       client.discussion = !!discussion;
+      client.lat = lat;
+      client.lon = lon;
 
       if (isBanned(client.deviceId)) {
         return ws.send(JSON.stringify({ type: 'banned', until: bansByDevice.get(client.deviceId).bannedUntilMs }));
       }
 
-      const baseRoomKey = getRoomKeyFromLocation(lat, lon);
-      const roomKey = client.discussion ? `${baseRoomKey}|discussion` : baseRoomKey;
+      // Spectators can roam anywhere based on URL; joiners prefer a nearby existing room
+      const roomKey = client.spectate
+        ? (client.discussion ? `${getRoomKeyFromLocation(lat, lon)}|discussion` : getRoomKeyFromLocation(lat, lon))
+        : selectPreferredRoomKey(lat, lon, client.discussion);
       client.roomKey = roomKey;
       if (!rooms.has(roomKey)) rooms.set(roomKey, new Set());
       rooms.get(roomKey).add(client);

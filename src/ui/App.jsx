@@ -23,45 +23,49 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
     return `${title} ${adj} ${noun} ${n}`;
   }
   
-  function getLocation() {
+  function getLocation(allowOverride = true) {
     return new Promise((resolve) => {
       try {
-      if (typeof window !== 'undefined') {
-        const params = new URLSearchParams(window.location.search);
-        // 1) Explicit lat/lon override
-        const latParam = params.get('lat');
-        const lonParam = params.get('lon');
-        if (latParam && lonParam) {
-          const lat = parseFloat(latParam);
-          const lon = parseFloat(lonParam);
-          if (Number.isFinite(lat) && Number.isFinite(lon)) return resolve({ lat, lon });
-        }
-        // 2) Room key override (?room=latKey:lonKey)
-        const room = params.get('room');
-        if (room && room.includes(':')) {
-          const [a, b] = room.split(':').map((v) => parseInt(v, 10));
-          if (Number.isFinite(a) && Number.isFinite(b)) {
-            const lat = (a + 0.5) * GRID_DEGREES;
-            const lon = (b + 0.5) * GRID_DEGREES;
-            return resolve({ lat, lon });
+        // Honor URL overrides only if explicitly allowed (Spectate mode)
+        if (allowOverride && typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          // 1) Explicit lat/lon override
+          const latParam = params.get('lat');
+          const lonParam = params.get('lon');
+          if (latParam && lonParam) {
+            const lat = parseFloat(latParam);
+            const lon = parseFloat(lonParam);
+            if (Number.isFinite(lat) && Number.isFinite(lon)) return resolve({ lat, lon });
+          }
+          // 2) Room key override (?room=latKey:lonKey)
+          const room = params.get('room');
+          if (room && room.includes(':')) {
+            const [a, b] = room.split(':').map((v) => parseInt(v, 10));
+            if (Number.isFinite(a) && Number.isFinite(b)) {
+              // Server rounds to nearest 100m cell; cell center is latKey*100 meters
+              const lat = (a * 100) / 111000;
+              // Match server's longitude meters scaling: metersPerDegLon = 111000 * cos(lat)
+              const metersPerDegLon = 111000 * Math.cos((lat * Math.PI) / 180);
+              const lon = metersPerDegLon ? ((b * 100) / metersPerDegLon) : 0;
+              return resolve({ lat, lon });
+            }
           }
         }
-      }
-    } catch (_) {}
+      } catch (_) {}
 
-    // 3) Geolocation (may be blocked on iOS over HTTP)
-    try {
-      if (!navigator.geolocation) return resolve({ lat: 0, lon: 0 });
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-        () => resolve({ lat: 0, lon: 0 }),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    } catch (_) {
-      return resolve({ lat: 0, lon: 0 });
-    }
-  });
-}
+      // 3) Geolocation (may be blocked on iOS over HTTP)
+      try {
+        if (!navigator.geolocation) return resolve({ lat: 0, lon: 0 });
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          () => resolve({ lat: 0, lon: 0 }),
+          { enableHighAccuracy: true, timeout: 5000 }
+        );
+      } catch (_) {
+        return resolve({ lat: 0, lon: 0 });
+      }
+    });
+  }
 
 export default function App() {
   const [screen, setScreen] = useState('home');
@@ -155,7 +159,8 @@ export default function App() {
     setSpectate(!!spectateMode);
     setIsDiscussion(!!discussionMode);
     setScreen('chat');
-    const { lat, lon } = await getLocation();
+    // Only Spectate can use URL overrides; Join uses true geolocation
+    const { lat, lon } = await getLocation(!!spectateMode);
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
